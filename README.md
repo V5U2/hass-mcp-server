@@ -32,7 +32,7 @@ MCP server for full Home Assistant control. AI agents (GitHub Copilot, Claude, e
 - **Event & calendar tools** — List event types, fire events, calendar queries
 - **State management** — Set, delete entity states; handle intents
 
-**66 tools** across 5 categories, using three HA transport layers: REST API, WebSocket API, and SSH/SFTP.
+**68 tools** across 6 categories, using three HA transport layers: REST API, WebSocket API, and SSH/SFTP.
 
 ## Prerequisites
 
@@ -370,6 +370,15 @@ Or if using password authentication:
 | `ha_get_calendar_events` | Get events from a specific calendar |
 | `ha_handle_intent` | Handle a conversation/voice intent |
 
+### Energy preferences (2 tools)
+
+These tools follow public third-party client practice. They are **not** a stable Home Assistant API. See [docs/energy-preferences.md](docs/energy-preferences.md) for the schema bands, site separation, and rollback rules.
+
+| Tool | Description |
+|------|-------------|
+| `ha_get_energy_prefs` | Read Energy preferences and a sha256 fingerprint. Does not write. |
+| `ha_replace_grid_export_statistic` | Replace one existing grid-export statistic when the fingerprint and the current id both match. |
+
 ## Architecture
 
 The server uses three transport layers to communicate with Home Assistant:
@@ -377,13 +386,15 @@ The server uses three transport layers to communicate with Home Assistant:
 | Layer | Used For | Library |
 |-------|----------|---------|
 | REST API (`/api/...`) | Service calls, states, history, templates, Supervisor proxy, automation/script/scene CRUD | Built-in `fetch` |
-| WebSocket API (`/api/websocket`) | Dashboard CRUD, helper CRUD, entity registry | `ws` |
+| WebSocket API (`/api/websocket`) | Dashboard CRUD, helper CRUD, entity registry, Energy preference read and one grid-export replacement | `ws` |
 | SSH/SFTP | File upload/download/list/delete on HA filesystem | `ssh2-sftp-client` |
 
 ```
 src/
 ├── index.ts              # MCP server entry point, registers all tools
 ├── config.ts             # Environment variable parsing and validation
+├── energy/
+│   └── grid-export.ts    # Fail-closed grid-export planning (no I/O)
 ├── ha/
 │   ├── rest-client.ts    # REST API client with auth header
 │   ├── ws-client.ts      # WebSocket client with auto-reconnect
@@ -393,7 +404,8 @@ src/
     ├── files.ts          # 7 file management tools
     ├── automations.ts    # 17 automation/script/scene/helper tools
     ├── addons.ts         # 18 app and system tools
-    └── entities.ts       # 18 entity and service tools
+    ├── entities.ts       # 18 entity and service tools
+    └── energy.ts         # 2 Energy preference tools
 
 vscode-extension/         # VS Code Marketplace extension wrapper
 └── src/
@@ -405,6 +417,8 @@ vscode-extension/         # VS Code Marketplace extension wrapper
 - **SFTP path restrictions**: Read operations are allowed anywhere under `/config/`. Write and delete operations are restricted to safe subdirectories (`www/`, `custom_components/`, `themes/`, `blueprints/`, `scripts/`, `automations/`) and specific files (`configuration.yaml`, `automations.yaml`, `scripts.yaml`, `scenes.yaml`). Write operations to system directories like `deps/` or `.storage/` are blocked.
 - **Token security**: Never commit your `.env` file. The `.gitignore` already excludes it.
 - **SSH authentication**: Prefer SSH key-based auth (`HA_SSH_KEY_PATH`) over passwords. Never commit private keys or passwords to source control.
+- **WebSocket TLS**: `WsClient` still sets `rejectUnauthorized: false`. This release does not change that. Do not treat the Energy websocket as certificate-verified.
+- **One site per process**: `HA_URL` and `HA_TOKEN` select the only instance this process can reach. Forthav and Glenroyd stay isolated by running separate processes. This server does not add Cloudflare headers.
 
 ## License
 
