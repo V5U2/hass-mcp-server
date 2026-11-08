@@ -40,9 +40,9 @@ export const ENERGY_SUPPORT = {
   ],
   commands: ["energy/get_prefs", "energy/save_prefs", "energy/validate"],
   concurrency:
-    "The fingerprint is a client lock computed by this process. Home Assistant does not enforce it. Another writer can still change preferences between the confirming read and save_prefs, or after the readback. This tool does not roll back.",
+    "Replacements in this process run one at a time. The next call reads again after the earlier call finishes, so a fingerprint taken before that write fails and does not save. Home Assistant still has no server-side lock: a writer outside this process can change preferences between the confirming read and save_prefs, or after the readback. This tool does not roll back.",
   validation:
-    "energy/validate inspects persisted preferences after a save. Public client docs do not define a stable empty-result schema, so the raw result is returned and is not treated as success or as a reason to write again.",
+    "success is true only when the readback matches the intended one-field change. energy/validate is reported separately in post_save_validation and validation. A thrown validate call, or a returned body that may contain issues, does not undo the save, does not make success false after a matched readback, and does not cause another write. Public client docs do not define a stable empty-result schema, so a returned body is not graded.",
 } as const;
 
 export interface HaVersion {

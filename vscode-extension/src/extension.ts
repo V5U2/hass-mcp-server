@@ -112,7 +112,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         const version: string =
-          context.extension.packageJSON.version ?? '1.0.10';
+          context.extension.packageJSON.version ?? '1.1.0';
 
         return [
           new vscode.McpStdioServerDefinition(

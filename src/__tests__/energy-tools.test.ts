@@ -261,6 +261,7 @@ describe("replaceGridExport", () => {
     expect(readbackFailed.outcome).toBe("persisted_readback_failed");
 
     reads = 0;
+    ws.sendCommand.mockClear();
     ws.sendCommand.mockImplementation(
       async (type: string, payload?: { energy_sources?: unknown[] }) => {
         if (type === "energy/get_prefs") return structuredClone(current);
@@ -284,8 +285,120 @@ describe("replaceGridExport", () => {
     expect(validationFailed.persistence).toBe("saved");
     expect(validationFailed.readback).toBe("matched");
     expect(validationFailed.post_save_validation).toBe("failed");
-    expect(validationFailed.outcome).toBe("persisted_validation_unavailable");
-    expect(validationFailed.success).toBe(false);
+    expect(validationFailed.outcome).toBe("persisted");
+    expect(validationFailed.success).toBe(true);
+    expect(validationFailed.message).toContain("replacement is persisted");
+    expect(validationFailed.message).not.toMatch(/nothing was written/i);
+    expect(validationFailed.diff_since_read).toEqual([
+      {
+        path: "$.energy_sources[0].stat_energy_to",
+        before: "sensor.grid_export_old",
+        after: "sensor.grid_export_new",
+      },
+    ]);
+    expect(
+      ws.sendCommand.mock.calls.filter((call) => call[0] === "energy/save_prefs"),
+    ).toHaveLength(1);
+  });
+
+  it("keeps success when validate returns an ungraded issue body", async () => {
+    const fingerprint = fingerprintPrefs(current);
+    ws.sendCommand.mockImplementation(
+      async (type: string, payload?: { energy_sources?: typeof current.energy_sources }) => {
+        if (type === "energy/get_prefs") return structuredClone(current);
+        if (type === "energy/save_prefs") {
+          current = {
+            ...current,
+            energy_sources: payload?.energy_sources as typeof current.energy_sources,
+          };
+          return null;
+        }
+        if (type === "energy/validate") {
+          return { energy_sources: [[{ type: "stat_not_valid" }]] };
+        }
+        throw new Error(`unexpected ${type}`);
+      },
+    );
+    const report = await replaceGridExport(rest, ws, {
+      expectedFingerprint: fingerprint,
+      oldStatistic: "sensor.grid_export_old",
+      newStatistic: "sensor.grid_export_new",
+    });
+    expect(report.success).toBe(true);
+    expect(report.persistence).toBe("saved");
+    expect(report.readback).toBe("matched");
+    expect(report.post_save_validation).toBe("returned");
+    expect(report.validation).toEqual({ energy_sources: [[{ type: "stat_not_valid" }]] });
+    expect(report.message).toContain("not graded");
+    expect(report.message).not.toMatch(/nothing was written/i);
+    expect(
+      ws.sendCommand.mock.calls.filter((call) => call[0] === "energy/save_prefs"),
+    ).toHaveLength(1);
+  });
+
+  it("runs overlapping replacements one at a time and fails the stale fingerprint", async () => {
+    const fingerprint = fingerprintPrefs(current);
+    let releaseFirstRead: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseFirstRead = resolve;
+    });
+    let gets = 0;
+    ws.sendCommand.mockImplementation(
+      async (type: string, payload?: { energy_sources?: typeof current.energy_sources }) => {
+        if (type === "energy/get_prefs") {
+          gets += 1;
+          if (gets === 1) await gate;
+          return structuredClone(current);
+        }
+        if (type === "energy/save_prefs") {
+          current = {
+            ...current,
+            energy_sources: payload?.energy_sources as typeof current.energy_sources,
+          };
+          return null;
+        }
+        if (type === "energy/validate") return { energy_sources: [[]] };
+        throw new Error(`unexpected ${type}`);
+      },
+    );
+
+    const first = replaceGridExport(rest, ws, {
+      expectedFingerprint: fingerprint,
+      oldStatistic: "sensor.grid_export_old",
+      newStatistic: "sensor.grid_export_new",
+    });
+    try {
+      await vi.waitFor(() => expect(gets).toBe(1));
+      let secondFinished = false;
+      const second = replaceGridExport(rest, ws, {
+        expectedFingerprint: fingerprint,
+        oldStatistic: "sensor.grid_export_old",
+        newStatistic: "sensor.grid_export_other",
+      }).then((report) => {
+        secondFinished = true;
+        return report;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(secondFinished).toBe(false);
+      expect(gets).toBe(1);
+      expect(
+        ws.sendCommand.mock.calls.filter((call) => call[0] === "energy/save_prefs"),
+      ).toHaveLength(0);
+
+      releaseFirstRead();
+      const [firstReport, secondReport] = await Promise.all([first, second]);
+      expect(firstReport.success).toBe(true);
+      expect(firstReport.persistence).toBe("saved");
+      expect(firstReport.readback).toBe("matched");
+      expect(secondReport.outcome).toBe("stale_fingerprint");
+      expect(secondReport.persistence).toBe("not_attempted");
+      expect(secondReport.success).toBe(false);
+      expect(
+        ws.sendCommand.mock.calls.filter((call) => call[0] === "energy/save_prefs"),
+      ).toHaveLength(1);
+    } finally {
+      releaseFirstRead();
+    }
   });
 
   it("refuses a unified document on a pre-2026.5 core without saving", async () => {

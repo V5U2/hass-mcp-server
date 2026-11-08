@@ -18,11 +18,15 @@ This is **not** an official stable Home Assistant API. The [WebSocket API](https
 
 A mixed document, a shape on the wrong side of that version pin, an unreadable version, more than one matching grid export, or no match is rejected before `energy/save_prefs`. Unknown fields on the matched object are copied. The save body contains only `energy_sources`.
 
-`energy/validate` is called after a save that returned without error and after a readback was fetched. Its body is returned raw. Public client docs do not define a stable "no issues" schema, so a validation payload is not treated as a pass, a failure, or a reason to write again.
+`energy/validate` is called after a save that returned without error and after a readback was fetched. Its body is returned raw. Public client docs do not define a stable "no issues" schema, so a validation payload is not graded.
+
+`success` is true only when `readback` is `matched`. A validate throw (`post_save_validation: failed`) or a returned body (`post_save_validation: returned`) does not change that, does not mean the write failed, and does not cause another write. `persistence: saved` still means the save command returned. Use `diff_since_read` for what changed and `diff_from_intended` when the readback does not match.
 
 ## Concurrency
 
-The fingerprint is sha256 of a canonical JSON copy of the preferences document, computed in this process. Home Assistant does not enforce it. The tool reads, checks the fingerprint, reads once more, and only then saves. A writer that lands between the confirming read and `energy/save_prefs`, or after the readback, is not prevented. There is no automatic rollback, because a later write could overwrite someone else.
+The fingerprint is sha256 of a canonical JSON copy of the preferences document, computed in this process. Replacements in one process run one at a time. The next call reads again after the earlier call finishes, so a fingerprint from before that write fails and does not save.
+
+Home Assistant does not enforce the fingerprint. A writer outside this process can still land between the confirming read and `energy/save_prefs`, or after the readback. There is no automatic rollback, because a later write could overwrite someone else.
 
 ## Sites, headers, and TLS
 

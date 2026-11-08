@@ -61,7 +61,9 @@ export function registerEnergyTools(server: McpServer, rest: RestClient, ws: WsC
         "Sends energy/save_prefs with only energy_sources, so other top-level keys stay untouched, and changes only the matched stat_energy_to. " +
         "Rejects a stale fingerprint, a missing match, more than one grid-export match, and a schema/version pair outside the published client bands " +
         "(legacy flow_to before HA 2026.5, unified grid object on HA 2026.5+). " +
-        "Not a stable Home Assistant API. The fingerprint cannot stop a concurrent writer. No automatic rollback.",
+        "Not a stable Home Assistant API. Replacements in this process are serialized and the later call re-reads; a stale fingerprint fails. " +
+        "A writer outside this process is still not atomic. success is true only when the readback matches. " +
+        "A validate error does not undo the save and does not retry it.",
       inputSchema: {
         expected_fingerprint: z
           .string()
@@ -110,7 +112,27 @@ export async function readReport(rest: RestClient, ws: WsClient): Promise<Report
   });
 }
 
+let replacementQueue: Promise<void> = Promise.resolve();
+
+/** One replacement at a time in this process. The waiter then reads current state itself. */
+function enqueueReplacement<T>(work: () => Promise<T>): Promise<T> {
+  const run = replacementQueue.then(work, work);
+  replacementQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 export async function replaceGridExport(
+  rest: RestClient,
+  ws: WsClient,
+  input: { expectedFingerprint: string; oldStatistic: string; newStatistic: string },
+): Promise<Report> {
+  return enqueueReplacement(() => replaceGridExportUnlocked(rest, ws, input));
+}
+
+async function replaceGridExportUnlocked(
   rest: RestClient,
   ws: WsClient,
   input: { expectedFingerprint: string; oldStatistic: string; newStatistic: string },
@@ -240,16 +262,16 @@ export async function replaceGridExport(
   const matched = fromIntended.length === 0;
   const validation = await readValidation(ws);
 
+  const validateNote =
+    validation.status === "failed"
+      ? " energy/validate then failed. The save was not undone and this tool will not send another write."
+      : " energy/validate returned a body. That body is not graded and was not used to undo or repeat the save.";
   return baseReport({
-    success: matched && validation.status !== "failed",
-    outcome: matched
-      ? validation.status === "failed"
-        ? "persisted_validation_unavailable"
-        : "persisted"
-      : "persisted_readback_mismatch",
+    success: matched,
+    outcome: matched ? "persisted" : "persisted_readback_mismatch",
     message: matched
-      ? "The readback matches the intended one-field change. Persistence succeeded. Validation is reported separately and was not used to write again."
-      : "energy/save_prefs returned without error, but the readback is not the intended document. No corrective write was sent.",
+      ? `The readback matches the intended one-field change. The replacement is persisted. See persistence, readback, diff_since_read, and post_save_validation.${validateNote}`
+      : "energy/save_prefs returned without error, but the readback is not the intended document. The save was not undone and this tool will not send another write. Compare persistence, readback, and diff_from_intended.",
     persistence: "saved",
     readback: matched ? "matched" : "mismatch",
     post_save_validation: validation.status,

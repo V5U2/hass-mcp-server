@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 - **Energy preferences**: `ha_get_energy_prefs` and `ha_replace_grid_export_statistic`. The replacement changes one existing grid-export statistic and requires the fingerprint from the read plus the exact current statistic id. Other sources and price fields are copied through, not rebuilt. See `docs/energy-preferences.md`.
 - The commands follow published third-party client practice (`energy/get_prefs`, `energy/save_prefs`, `energy/validate`). They are not a stable Home Assistant API.
+- Replacements in one process are serialized. A later call re-reads, and a stale fingerprint does not save. A writer outside the process is still not atomic.
+- `success` means the readback matched the intended change. A later `energy/validate` error or body does not undo the save and does not trigger another write.
 
 ## [1.0.10] — 2026-03-30
 
