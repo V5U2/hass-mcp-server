@@ -13,6 +13,7 @@ import {
 } from "../tools/automations.js";
 import { registerAddonTools, registerSystemTools } from "../tools/addons.js";
 import { registerEntityTools } from "../tools/entities.js";
+import { registerEnergyTools } from "../tools/energy.js";
 
 describe("MCP tool registration smoke test", () => {
   let server: McpServer;
@@ -35,10 +36,11 @@ describe("MCP tool registration smoke test", () => {
     registerAddonTools(server, mockRest);
     registerSystemTools(server, mockRest, mockWs);
     registerEntityTools(server, mockRest, mockWs);
+    registerEnergyTools(server, mockRest, mockWs);
   });
 
-  it("registers exactly 65 tools", () => {
-    expect(registerSpy).toHaveBeenCalledTimes(66);
+  it("registers exactly 68 tools", () => {
+    expect(registerSpy).toHaveBeenCalledTimes(68);
   });
 
   it("every tool has a unique name", () => {
@@ -74,5 +76,7 @@ describe("MCP tool registration smoke test", () => {
     expect(names).toContain("ha_list_addons");
     expect(names).toContain("ha_system_info");
     expect(names).toContain("ha_get_states");
+    expect(names).toContain("ha_get_energy_prefs");
+    expect(names).toContain("ha_replace_grid_export_statistic");
   });
 });

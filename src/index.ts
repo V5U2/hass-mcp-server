@@ -16,6 +16,7 @@ import {
 } from "./tools/automations.js";
 import { registerAddonTools, registerSystemTools } from "./tools/addons.js";
 import { registerEntityTools } from "./tools/entities.js";
+import { registerEnergyTools } from "./tools/energy.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
   registerAddonTools(server, rest);
   registerSystemTools(server, rest, ws);
   registerEntityTools(server, rest, ws);
+  registerEnergyTools(server, rest, ws);
 
   // Handle graceful shutdown
   const cleanup = async () => {
